@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Optimized Mobile Composite Multi-Stream with Audio Selection</title>
+  <title>WebGL Composite Multi-Stream Viewer with Audio Selection</title>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <style>
     body { margin: 0; background: #000; overflow: hidden; }
-    #compositeCanvas { display: block; width: 100vw; height: 100vh; }
+    #glCanvas { display: block; width: 100vw; height: 100vh; }
     #audioControls {
       position: fixed;
       bottom: 10px;
@@ -13,41 +13,46 @@
       transform: translateX(-50%);
       display: flex;
       gap: 10px;
-      z-index: 100;
+      z-index: 10;
     }
-    .hidden-video { position: absolute; width: 1px; height: 1px; opacity: 0; }
+    .hidden-video {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+    }
   </style>
 </head>
 <body>
+  <!-- Hidden video elements for each stream -->
+  <video id="vid0" class="hidden-video" autoplay playsinline muted></video>
   <video id="vid1" class="hidden-video" autoplay playsinline muted></video>
   <video id="vid2" class="hidden-video" autoplay playsinline muted></video>
   <video id="vid3" class="hidden-video" autoplay playsinline muted></video>
-  <video id="vid4" class="hidden-video" autoplay playsinline muted></video>
-  
-  <canvas id="compositeCanvas"></canvas>
-  
+
+  <!-- Canvas where WebGL will composite the streams -->
+  <canvas id="glCanvas"></canvas>
+
+  <!-- Audio control buttons -->
   <div id="audioControls">
     <button onclick="selectAudio(0)">Audio 1</button>
     <button onclick="selectAudio(1)">Audio 2</button>
     <button onclick="selectAudio(2)">Audio 3</button>
     <button onclick="selectAudio(3)">Audio 4</button>
   </div>
-  
+
   <script>
+    // Stream URLs
     const streams = [
       "https://watchlivestream.sbs/o4",
       "https://watchlivestream.sbs/o5",
       "https://watchlivestream.sbs/o2",
       "https://watchlivestream.sbs/o3"
     ];
-    const videoElements = [
-      document.getElementById("vid1"),
-      document.getElementById("vid2"),
-      document.getElementById("vid3"),
-      document.getElementById("vid4")
-    ];
-    
-    videoElements.forEach((video, i) => {
+    const videos = [];
+    for (let i = 0; i < 4; i++) {
+      const video = document.getElementById('vid' + i);
+      videos.push(video);
       if (Hls.isSupported()) {
         const hls = new Hls();
         hls.loadSource(streams[i]);
@@ -55,60 +60,156 @@
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = streams[i];
       }
-    });
-    
-    const canvas = document.getElementById("compositeCanvas");
-    const ctx = canvas.getContext("2d");
-    
-    // Set canvas size using devicePixelRatio for better resolution on mobile.
-    function resizeCanvas() {
-      const dpr = window.devicePixelRatio || 1;
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      canvas.style.width = width + "px";
-      canvas.style.height = height + "px";
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
-    window.addEventListener("resize", resizeCanvas);
-    resizeCanvas();
-    
-    let lastDrawTime = 0;
-    function drawComposite(timestamp) {
-      // Limit to ~30 fps (33ms per frame)
-      if(timestamp - lastDrawTime < 33) {
-         requestAnimationFrame(drawComposite);
-         return;
-      }
-      lastDrawTime = timestamp;
-      
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const halfWidth = canvas.width / (2 * (window.devicePixelRatio || 1));
-      const halfHeight = canvas.height / (2 * (window.devicePixelRatio || 1));
-      
-      // Only draw if each video is ready (readyState 2 or higher)
-      if(videoElements[0].readyState >= 2)
-        ctx.drawImage(videoElements[0], 0, 0, halfWidth, halfHeight);
-      if(videoElements[1].readyState >= 2)
-        ctx.drawImage(videoElements[1], halfWidth, 0, halfWidth, halfHeight);
-      if(videoElements[2].readyState >= 2)
-        ctx.drawImage(videoElements[2], 0, halfHeight, halfWidth, halfHeight);
-      if(videoElements[3].readyState >= 2)
-        ctx.drawImage(videoElements[3], halfWidth, halfHeight, halfWidth, halfHeight);
-      
-      requestAnimationFrame(drawComposite);
-    }
-    requestAnimationFrame(drawComposite);
-    
+
     // Audio selection: unmute the chosen stream and mute the others.
     function selectAudio(index) {
-      videoElements.forEach((video, i) => {
-        video.muted = (i !== index);
-      });
+      videos.forEach((v, i) => { v.muted = (i !== index); });
     }
-    // Auto-select the first stream’s audio.
     selectAudio(0);
+
+    // Set up WebGL
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // Vertex shader source
+    const vsSource = `
+      attribute vec2 a_position;
+      attribute vec2 a_texCoord;
+      varying vec2 v_texCoord;
+      void main(){
+        gl_Position = vec4(a_position, 0, 1);
+        v_texCoord = a_texCoord;
+      }
+    `;
+    // Fragment shader source
+    const fsSource = `
+      precision mediump float;
+      varying vec2 v_texCoord;
+      uniform sampler2D u_texture;
+      void main(){
+        gl_FragColor = texture2D(u_texture, v_texCoord);
+      }
+    `;
+    function createShader(gl, type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+      }
+      return shader;
+    }
+    function createProgram(gl, vsSource, fsSource) {
+      const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+      const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+      const program = gl.createProgram();
+      gl.attachShader(program, vertexShader);
+      gl.attachShader(program, fragmentShader);
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('Program link error:', gl.getProgramInfoLog(program));
+        gl.deleteProgram(program);
+        return null;
+      }
+      return program;
+    }
+    const program = createProgram(gl, vsSource, fsSource);
+    gl.useProgram(program);
+
+    // Look up attribute/uniform locations
+    const positionLocation = gl.getAttribLocation(program, 'a_position');
+    const texCoordLocation = gl.getAttribLocation(program, 'a_texCoord');
+    const textureLocation = gl.getUniformLocation(program, 'u_texture');
+
+    // Create buffer for vertex positions
+    const positionBuffer = gl.createBuffer();
+
+    // Create buffer for texture coordinates (static for each quad)
+    const texCoordBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+    const quadTexCoords = [
+      0, 0,
+      1, 0,
+      0, 1,
+      0, 1,
+      1, 0,
+      1, 1,
+    ];
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(quadTexCoords), gl.STATIC_DRAW);
+
+    // Create textures for each video
+    const textures = [];
+    for (let i = 0; i < 4; i++) {
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      textures.push(tex);
+    }
+
+    // Update texture with current video frame
+    function updateTexture(video, texture) {
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      try {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, video);
+      } catch (e) {
+        // Video might not be ready yet.
+      }
+    }
+
+    // Draw a textured quad for a given rectangle in clip space
+    function drawQuad(x1, y1, x2, y2, texture) {
+      const positions = [
+        x1, y2,
+        x2, y2,
+        x1, y1,
+        x1, y1,
+        x2, y2,
+        x2, y1,
+      ];
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.DYNAMIC_DRAW);
+      gl.enableVertexAttribArray(positionLocation);
+      gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+      gl.enableVertexAttribArray(texCoordLocation);
+      gl.vertexAttribPointer(texCoordLocation, 2, gl.FLOAT, false, 0, 0);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.uniform1i(textureLocation, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    // Animation loop: composite the four video textures into quadrants
+    function render() {
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      // Define quadrants in clip space (from -1 to 1)
+      const quadrants = [
+        { x1: -1, y1: 0, x2: 0, y2: 1 },   // Top-left
+        { x1: 0,  y1: 0, x2: 1, y2: 1 },   // Top-right
+        { x1: -1, y1: -1, x2: 0, y2: 0 },   // Bottom-left
+        { x1: 0,  y1: -1, x2: 1, y2: 0 }    // Bottom-right
+      ];
+      for (let i = 0; i < 4; i++) {
+        if (videos[i].readyState >= 2) updateTexture(videos[i], textures[i]);
+        const q = quadrants[i];
+        drawQuad(q.x1, q.y1, q.x2, q.y2, textures[i]);
+      }
+      requestAnimationFrame(render);
+    }
+    requestAnimationFrame(render);
   </script>
 </body>
 </html>
