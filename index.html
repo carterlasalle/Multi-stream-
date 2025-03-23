@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Mobile Composite Multi-Stream with Audio Selection</title>
+  <title>Optimized Mobile Composite Multi-Stream with Audio Selection</title>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <style>
-    body { margin: 0; background: #000; }
-    #compositeCanvas { display: block; margin: auto; }
+    body { margin: 0; background: #000; overflow: hidden; }
+    #compositeCanvas { display: block; width: 100vw; height: 100vh; }
     #audioControls {
       position: fixed;
       bottom: 10px;
@@ -13,27 +13,19 @@
       transform: translateX(-50%);
       display: flex;
       gap: 10px;
+      z-index: 100;
     }
-    /* Hidden videos still playing for audio */
-    .hidden-video {
-      position: absolute;
-      top: 0; left: 0;
-      width: 1px; height: 1px;
-      opacity: 0;
-    }
+    .hidden-video { position: absolute; width: 1px; height: 1px; opacity: 0; }
   </style>
 </head>
 <body>
-  <!-- Hidden video elements used to play streams (their frames will be drawn on the canvas) -->
   <video id="vid1" class="hidden-video" autoplay playsinline muted></video>
   <video id="vid2" class="hidden-video" autoplay playsinline muted></video>
   <video id="vid3" class="hidden-video" autoplay playsinline muted></video>
   <video id="vid4" class="hidden-video" autoplay playsinline muted></video>
   
-  <!-- Canvas for composite video display -->
-  <canvas id="compositeCanvas" width="640" height="360"></canvas>
+  <canvas id="compositeCanvas"></canvas>
   
-  <!-- Audio control buttons -->
   <div id="audioControls">
     <button onclick="selectAudio(0)">Audio 1</button>
     <button onclick="selectAudio(1)">Audio 2</button>
@@ -42,7 +34,6 @@
   </div>
   
   <script>
-    // The four stream URLs
     const streams = [
       "https://watchlivestream.sbs/o4",
       "https://watchlivestream.sbs/o5",
@@ -56,7 +47,6 @@
       document.getElementById("vid4")
     ];
     
-    // Initialize each video element with HLS playback
     videoElements.forEach((video, i) => {
       if (Hls.isSupported()) {
         const hls = new Hls();
@@ -67,28 +57,57 @@
       }
     });
     
-    // Composite the videos onto a canvas
     const canvas = document.getElementById("compositeCanvas");
     const ctx = canvas.getContext("2d");
-    function drawComposite() {
+    
+    // Set canvas size using devicePixelRatio for better resolution on mobile.
+    function resizeCanvas() {
+      const dpr = window.devicePixelRatio || 1;
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      canvas.style.width = width + "px";
+      canvas.style.height = height + "px";
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    window.addEventListener("resize", resizeCanvas);
+    resizeCanvas();
+    
+    let lastDrawTime = 0;
+    function drawComposite(timestamp) {
+      // Limit to ~30 fps (33ms per frame)
+      if(timestamp - lastDrawTime < 33) {
+         requestAnimationFrame(drawComposite);
+         return;
+      }
+      lastDrawTime = timestamp;
+      
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const halfWidth = canvas.width / 2;
-      const halfHeight = canvas.height / 2;
-      if (videoElements[0].readyState >= 2) ctx.drawImage(videoElements[0], 0, 0, halfWidth, halfHeight);
-      if (videoElements[1].readyState >= 2) ctx.drawImage(videoElements[1], halfWidth, 0, halfWidth, halfHeight);
-      if (videoElements[2].readyState >= 2) ctx.drawImage(videoElements[2], 0, halfHeight, halfWidth, halfHeight);
-      if (videoElements[3].readyState >= 2) ctx.drawImage(videoElements[3], halfWidth, halfHeight, halfWidth, halfHeight);
+      const halfWidth = canvas.width / (2 * (window.devicePixelRatio || 1));
+      const halfHeight = canvas.height / (2 * (window.devicePixelRatio || 1));
+      
+      // Only draw if each video is ready (readyState 2 or higher)
+      if(videoElements[0].readyState >= 2)
+        ctx.drawImage(videoElements[0], 0, 0, halfWidth, halfHeight);
+      if(videoElements[1].readyState >= 2)
+        ctx.drawImage(videoElements[1], halfWidth, 0, halfWidth, halfHeight);
+      if(videoElements[2].readyState >= 2)
+        ctx.drawImage(videoElements[2], 0, halfHeight, halfWidth, halfHeight);
+      if(videoElements[3].readyState >= 2)
+        ctx.drawImage(videoElements[3], halfWidth, halfHeight, halfWidth, halfHeight);
+      
       requestAnimationFrame(drawComposite);
     }
-    drawComposite();
+    requestAnimationFrame(drawComposite);
     
-    // Audio selection: unmute the chosen video and mute the rest
+    // Audio selection: unmute the chosen stream and mute the others.
     function selectAudio(index) {
       videoElements.forEach((video, i) => {
         video.muted = (i !== index);
       });
     }
-    // Auto-select the first stream’s audio by default
+    // Auto-select the first stream’s audio.
     selectAudio(0);
   </script>
 </body>
