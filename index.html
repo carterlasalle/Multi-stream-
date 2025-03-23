@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Mobile Composite Multi-Stream with Audio Selection</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <style>
+    body { margin: 0; background: #000; }
+    #compositeCanvas { display: block; margin: auto; }
+    #audioControls {
+      position: fixed;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+    }
+    /* Hidden videos still playing for audio */
+    .hidden-video {
+      position: absolute;
+      top: 0; left: 0;
+      width: 1px; height: 1px;
+      opacity: 0;
+    }
+  </style>
+</head>
+<body>
+  <!-- Hidden video elements used to play streams (their frames will be drawn on the canvas) -->
+  <video id="vid1" class="hidden-video" autoplay playsinline muted></video>
+  <video id="vid2" class="hidden-video" autoplay playsinline muted></video>
+  <video id="vid3" class="hidden-video" autoplay playsinline muted></video>
+  <video id="vid4" class="hidden-video" autoplay playsinline muted></video>
+  
+  <!-- Canvas for composite video display -->
+  <canvas id="compositeCanvas" width="640" height="360"></canvas>
+  
+  <!-- Audio control buttons -->
+  <div id="audioControls">
+    <button onclick="selectAudio(0)">Audio 1</button>
+    <button onclick="selectAudio(1)">Audio 2</button>
+    <button onclick="selectAudio(2)">Audio 3</button>
+    <button onclick="selectAudio(3)">Audio 4</button>
+  </div>
+  
+  <script>
+    // The four stream URLs
+    const streams = [
+      "https://watchlivestream.sbs/o4",
+      "https://watchlivestream.sbs/o5",
+      "https://watchlivestream.sbs/o2",
+      "https://watchlivestream.sbs/o3"
+    ];
+    const videoElements = [
+      document.getElementById("vid1"),
+      document.getElementById("vid2"),
+      document.getElementById("vid3"),
+      document.getElementById("vid4")
+    ];
+    
+    // Initialize each video element with HLS playback
+    videoElements.forEach((video, i) => {
+      if (Hls.isSupported()) {
+        const hls = new Hls();
+        hls.loadSource(streams[i]);
+        hls.attachMedia(video);
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = streams[i];
+      }
+    });
+    
+    // Composite the videos onto a canvas
+    const canvas = document.getElementById("compositeCanvas");
+    const ctx = canvas.getContext("2d");
+    function drawComposite() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const halfWidth = canvas.width / 2;
+      const halfHeight = canvas.height / 2;
+      if (videoElements[0].readyState >= 2) ctx.drawImage(videoElements[0], 0, 0, halfWidth, halfHeight);
+      if (videoElements[1].readyState >= 2) ctx.drawImage(videoElements[1], halfWidth, 0, halfWidth, halfHeight);
+      if (videoElements[2].readyState >= 2) ctx.drawImage(videoElements[2], 0, halfHeight, halfWidth, halfHeight);
+      if (videoElements[3].readyState >= 2) ctx.drawImage(videoElements[3], halfWidth, halfHeight, halfWidth, halfHeight);
+      requestAnimationFrame(drawComposite);
+    }
+    drawComposite();
+    
+    // Audio selection: unmute the chosen video and mute the rest
+    function selectAudio(index) {
+      videoElements.forEach((video, i) => {
+        video.muted = (i !== index);
+      });
+    }
+    // Auto-select the first stream’s audio by default
+    selectAudio(0);
+  </script>
+</body>
+</html>
